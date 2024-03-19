@@ -1,0 +1,89 @@
+import json
+import random
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from nltk.stem import WordNetLemmatizer
+import nltk
+from sklearn.preprocessing import LabelEncoder
+
+# Ensure necessary NLTK datasets are available
+nltk.download('punkt', quiet=True)
+nltk.download('wordnet', quiet=True)
+
+# Initialize the lemmatizer to normalize words
+lemmatizer = WordNetLemmatizer()
+
+# Load intents JSON file to structure conversational intents
+with open('/content/sample_data/intents.json') as file:
+    intents = json.load(file)
+
+# Initialize lists to hold words, classes, and document pairs
+words = []
+classes = []
+documents = []
+ignore_letters = ['?', '!', ',', '.']
+
+# Loop through each intent and tokenize, lemmatize, and append data
+for intent in intents['intents']:
+    for pattern in intent['patterns']:
+        # Tokenize each pattern
+        word_list = nltk.word_tokenize(pattern)
+        words.extend(word_list)
+        # Add the tokenized pattern to documents
+        documents.append((word_list, intent['tag']))
+        # Add the intent to classes if it's not already there
+        if intent['tag'] not in classes:
+            classes.append(intent['tag'])
+
+# Lemmatize, lower, and remove duplicates from words
+words = [lemmatizer.lemmatize(w.lower()) for w in words if w not in ignore_letters]
+words = sorted(set(words))
+
+# Sort classes
+classes = sorted(set(classes))
+
+# Create training data
+training = []
+output_empty = [0] * len(classes)  # Output is initially empty for each class
+
+# Prepare training data as bag of words for each sentence
+for doc in documents:
+    bag = []  # Initialize bag of words
+    pattern_words = doc[0]
+    # Lemmatize words in the pattern
+    pattern_words = [lemmatizer.lemmatize(word.lower()) for word in pattern_words]
+    # Create a bag of words array
+    for word in words:
+        bag.append(1 if word in pattern_words else 0)
+    
+    # Output is a '1' for the current tag and '0' for others
+    output_row = list(output_empty)
+    output_row[classes.index(doc[1])] = 1
+    training.append([bag, output_row])
+
+# Shuffle the training data and convert it to an array
+random.shuffle(training)
+training = np.array(training, dtype=object)
+train_x = list(training[:, 0])
+train_y = list(training[:, 1])
+
+# Define the neural network model
+model = Sequential([
+    Dense(128, input_shape=(len(train_x[0]),), activation='relu'),
+    Dropout(0.5),
+    Dense(64, activation='relu'),
+    Dense(len(train_y[0]), activation='softmax')
+])
+
+# Compile model with optimizer and loss function
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+# Train the model
+model.fit(np.array(train_x), np.array(train_y), epochs=200, batch_size=5, verbose=1)
+
+# Save the trained model for future use
+model.save('chatbot_model.h5')
+
+print("Model training complete.")

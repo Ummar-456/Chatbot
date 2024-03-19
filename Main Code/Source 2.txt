@@ -1,0 +1,68 @@
+lemmatizer = WordNetLemmatizer()
+intents = json.loads(open('/content/sample_data/intents.json').read())
+words = pickle.load(open('/content/sample_data/words.pkl', 'rb'))
+classes = pickle.load(open('/content/sample_data/classes.pkl', 'rb'))
+
+# Initialize a simple session management
+sessions = {}
+
+model = load_model('chatbot_firstattempt.h5')
+
+def clean_up_sentence(sentence):
+    sentence_words = nltk.word_tokenize(sentence)
+    sentence_words = [lemmatizer.lemmatize(word) for word in sentence_words]
+    return sentence_words
+
+def bag_of_words(sentence, words):
+    sentence_words = clean_up_sentence(sentence)
+    bag = [0] * len(words)  # Fixed to correctly initialize the bag array
+    for s in sentence_words:
+        for i, w in enumerate(words):
+            if w == s:
+                bag[i] = 1
+    return np.array(bag)
+
+def predict_class(sentence, model, classes, words, userID='default'):
+    bow = bag_of_words(sentence, words)
+    res = model.predict(np.array([bow]))[0]
+    ERROR_THRESHOLD = 0.25
+    results = [[i, r] for i, r in enumerate(res) if r > ERROR_THRESHOLD]
+    results.sort(key=lambda x: x[1], reverse=True)
+    
+    # Retrieve current context of the user session
+    current_context = sessions.get(userID, {}).get('context', '')
+
+    return_list = []
+    for r in results:
+        intent_class = classes[r[0]]
+        # Filter out predictions not matching the current context
+        for intent in intents['intents']:
+            if intent['tag'] == intent_class and (not intent.get('context_filter') or intent['context_filter'] == current_context):
+                return_list.append({'intent': intent_class, 'probability': str(r[1])})
+                break  # Break since we found the matching intent
+    
+    return return_list
+
+def get_response(intents_list, intents_json, userID='default'):
+    tag = intents_list[0]['intent']
+    list_of_intents = intents_json['intents']
+    
+    # Update or clear the context in user session
+    for i in list_of_intents:
+        if i['tag'] == tag:
+            # Set or clear context
+            if 'context_set' in i:
+                if not sessions.get(userID):
+                    sessions[userID] = {}
+                sessions[userID]['context'] = i['context_set']
+            elif sessions.get(userID):
+                # Optionally, clear context if needed
+                sessions[userID].pop('context', None)
+            return random.choice(i['responses'])
+
+# Ensure proper function call with necessary parameters and correct errors
+while True:
+    message = input("")
+    ints = predict_class(message, model, classes, words)
+    res = get_response(ints, intents, userID='user1')  # Example usage with a fixed userID
+    print(res)
